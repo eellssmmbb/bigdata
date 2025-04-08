@@ -1,19 +1,16 @@
 version: '3.8'
 
 services:
-  mysql:
-    image: mysql:8
-    container_name: forum_mysql
+  db:
+    image: postgres:14
     environment:
-      MYSQL_DATABASE: forum_logs
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      POSTGRES_DB: forum_logs
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./init:/docker-entrypoint-initdb.d
+      - db_data:/var/lib/postgresql/data
 
 volumes:
-  mysql_data:
+  db_data:
