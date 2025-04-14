@@ -1,77 +1,55 @@
-CREATE TABLE users (
-    user_id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
+-- Создание базы данных
+CREATE DATABASE IF NOT EXISTS forum_db;
+USE forum_db;
+
+-- Таблица пользователей
+CREATE TABLE IF NOT EXISTS users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    registration_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE anonymous_users (
-    anon_id SERIAL PRIMARY KEY,
-    session_id VARCHAR(255) UNIQUE NOT NULL,
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-    first_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE topics (
-    topic_id SERIAL PRIMARY KEY,
+-- Таблица тем
+CREATE TABLE IF NOT EXISTS topics (
+    topic_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
     title VARCHAR(255) NOT NULL,
-    content TEXT,
-    created_by INT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted BOOLEAN DEFAULT FALSE,
-    deleted_at TIMESTAMP,
-    FOREIGN KEY (created_by) REFERENCES users(user_id)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
-CREATE TABLE messages (
-    message_id SERIAL PRIMARY KEY,
-    topic_id INT NOT NULL,
+-- Таблица сообщений
+CREATE TABLE IF NOT EXISTS messages (
+    message_id INT AUTO_INCREMENT PRIMARY KEY,
+    topic_id INT,
+    user_id INT,
     content TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    user_id INT,
-    anon_id INT,
-    is_deleted BOOLEAN DEFAULT FALSE,
-    deleted_at TIMESTAMP,
-    FOREIGN KEY (topic_id) REFERENCES topics(topic_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (anon_id) REFERENCES anonymous_users(anon_id),
-    CHECK (user_id IS NOT NULL OR anon_id IS NOT NULL)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (topic_id) REFERENCES topics(topic_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
-CREATE TABLE action_types (
-    action_type_id SERIAL PRIMARY KEY,
-    name VARCHAR(50) UNIQUE NOT NULL,
-    description TEXT
-);
-
-INSERT INTO action_types (name, description) VALUES
-('first_visit', 'Первый заход на сайт'),
-('registration', 'Регистрация пользователя'),
-('login', 'Вход в систему'),
-('logout', 'Выход из системы'),
-('topic_create', 'Создание темы'),
-('topic_view', 'Просмотр темы'),
-('topic_delete', 'Удаление темы'),
-('message_post', 'Написание сообщения');
-
-CREATE TABLE user_logs (
-    log_id SERIAL PRIMARY KEY,
-    action_type_id INT NOT NULL,
-    user_id INT,
-    anon_id INT,
-    action_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    entity_type VARCHAR(50),
-    entity_id INT,
-    server_response VARCHAR(20) NOT NULL,
-    additional_info TEXT,
+-- Таблица логов действий
+CREATE TABLE IF NOT EXISTS logs (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    session_id VARCHAR(64),
+    action ENUM(
+        'first_visit', 
+        'register', 
+        'login', 
+        'logout', 
+        'create_topic', 
+        'view_topic', 
+        'delete_topic', 
+        'post_message'
+    ) NOT NULL,
+    target_id INT NULL,
+    target_type ENUM('topic', 'message') NULL,
     ip_address VARCHAR(45),
-    user_agent TEXT,
-    FOREIGN KEY (action_type_id) REFERENCES action_types(action_type_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (anon_id) REFERENCES anonymous_users(anon_id),
-    CHECK (user_id IS NOT NULL OR anon_id IS NOT NULL)
+    user_agent VARCHAR(255),
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );
