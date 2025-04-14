@@ -1,92 +1,60 @@
 import mysql.connector
-import csv
-import sys
+import random
+import string
 from datetime import datetime, timedelta
 
-# Параметры подключения к MySQL
+# Параметры подключения к базе данных MySQL
 DB_PARAMS = {
     'host': 'localhost',
-    'port': 3306,
-    'user': 'user',  
-    'password': 'password',
-    'database': 'forum_db'
+    'user': 'user',  # Замените на ваше имя пользователя MySQL
+    'password': 'password',  # Замените на ваш пароль MySQL
+    'database': 'forum_db'  # Название вашей базы данных
 }
 
-# Подключение к БД
+# Функция для подключения к базе данных
 def connect_db():
-    print("Connecting to MySQL database...")
-    return mysql.connector.connect(**DB_PARAMS)
+    try:
+        conn = mysql.connector.connect(**DB_PARAMS)
+        return conn
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+        return None
 
-# Агрегация данных
-def aggregate_data(start_date, end_date):
+# Генерация случайной строки
+def random_string(length=10):
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+# Генерация данных
+def generate_data():
     conn = connect_db()
+    if conn is None:
+        return
+
     cur = conn.cursor()
 
-    results = []
+    # Генерация данных пользователей
+    users = [(random_string(10), f"{random_string(10)}@example.com", random_string(32), datetime.now() - timedelta(days=random.randint(0, 365))) for _ in range(100)]
+    # Генерация данных тем
+    topics = [(random.randint(1, 100), random_string(20), datetime.now() - timedelta(days=random.randint(0, 30))) for _ in range(50)]
+    # Генерация данных сообщений
+    messages = [(random.randint(1, 50), random.randint(1, 100), random_string(100), datetime.now() - timedelta(days=random.randint(0, 30))) for _ in range(200)]
+    # Генерация данных логов
+    logs = [(random.choice([None, random.randint(1, 100)]), random_string(64), random.choice(['first_visit', 'register', 'login', 'logout', 'create_topic', 'view_topic', 'delete_topic', 'post_message']), random.choice([random.randint(1, 50), None]), random.choice(['topic', 'message', None]), f"192.168.1.{random.randint(1, 254)}", random_string(20), datetime.now() - timedelta(days=random.randint(0, 30))) for _ in range(300)]
 
-    query = """
-    SELECT 
-        DATE(timestamp) AS day,
-        COUNT(DISTINCT CASE WHEN action_id = 2 THEN user_id END) AS new_accounts,
-        COUNT(CASE WHEN action_id = 8 THEN 1 END) AS total_messages,
-        COUNT(CASE WHEN action_id = 8 AND user_id IS NULL THEN 1 END) AS anonymous_messages,
-        COUNT(CASE WHEN action_id = 5 THEN 1 END) AS new_themes
-    FROM logs
-    WHERE timestamp BETWEEN %s AND %s
-    GROUP BY day
-    ORDER BY day;
-    """
-
-    cur.execute(query, (start_date, end_date))
-    rows = cur.fetchall()
-
-    prev_day_themes = None
-
-    for row in rows:
-        day, new_accounts, total_messages, anonymous_messages, new_themes = row
-
-        anonymous_percentage = (anonymous_messages / total_messages * 100) if total_messages > 0 else 0
-
-        if prev_day_themes is not None:
-            theme_growth_percentage = ((new_themes - prev_day_themes) / prev_day_themes * 100) if prev_day_themes > 0 else 0
-        else:
-            theme_growth_percentage = 0
-
-        results.append([day, new_accounts, anonymous_percentage, total_messages, theme_growth_percentage])
-        prev_day_themes = new_themes
-
-    conn.close()
-    return results
-
-# Запись в CSV
-def write_to_csv(data, filename='aggregated_logs.csv'):
-    with open(filename, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        writer.writerow(['Day', 'New Accounts', 'Anonymous Messages (%)', 'Total Messages', 'Theme Growth (%)'])
-        writer.writerows(data)
-
-# Основная функция
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: python generation.py YYYY-MM-DD YYYY-MM-DD")
-        sys.exit(1)
-
-    start_date = sys.argv[1]
-    end_date = sys.argv[2]
-
+    # Вставка данных в таблицы
     try:
-        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
-    except ValueError:
-        print("Invalid date format. Use YYYY-MM-DD.")
-        sys.exit(1)
+        cur.executemany("INSERT INTO users (username, email, password_hash, created_at) VALUES (%s, %s, %s, %s)", users)
+        cur.executemany("INSERT INTO topics (user_id, title, created_at) VALUES (%s, %s, %s)", topics)
+        cur.executemany("INSERT INTO messages (topic_id, user_id, content, created_at) VALUES (%s, %s, %s, %s)", messages)
+        cur.executemany("INSERT INTO logs (user_id, session_id, action, target_id, target_type, ip_address, user_agent, timestamp) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", logs)
 
-    print(f"Aggregating from {start_date_obj} to {end_date_obj}...")
+        conn.commit()
+        print("Data generation complete!")
+    except mysql.connector.Error as err:
+        print(f"Error while inserting data: {err}")
+    finally:
+        conn.close()
 
-    data = aggregate_data(start_date, end_date)
-    write_to_csv(data)
-
-    print("Done. Data saved to 'aggregated_logs.csv'.")
-
+# Запуск скрипта
 if __name__ == '__main__':
-    main()
+    generate_data()
