@@ -1,20 +1,14 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  db:
+  forum_db:
     image: postgres:14
     container_name: forum_db
     environment:
-      POSTGRES_DB: forumdb
       POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: forum_db
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
-    volumes:
-      - forum_db_data:/var/lib/postgresql/data
-      - ./init:/docker-entrypoint-initdb.d
-      
-    restart: always
-
-volumes:
-  forum_db_data:
