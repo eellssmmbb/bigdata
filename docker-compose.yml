@@ -1,21 +1,21 @@
 version: '3.8'
 
 services:
-  mysql:
+  db:
     image: mysql:8.0
-    container_name: forum_mysql
-    restart: always
+    container_name: forum_db
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: forum_db
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: rootpassword   # Пароль для root
+      MYSQL_DATABASE: forum_db            # База данных
+      MYSQL_USER: user                    # Имя пользователя
+      MYSQL_PASSWORD: userpassword        # Пароль пользователя
     ports:
-      - "127.0.0.1:3307:3306" # Правильный формат проброса портов
+      - "3307:3306"                       # Прокси порта MySQL
     volumes:
-      - mysql_data:/var/lib/mysql  # Только имя тома здесь
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    command: --default-authentication-plugin=mysql_native_password
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Инициализация базы данных из init.sql
+    networks:
+      - forum_network
 
-volumes:
-  mysql_data:  # Определение тома здесь
+networks:
+  forum_network:
+    driver: bridge

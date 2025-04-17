@@ -1,155 +1,94 @@
-import csv
+import mysql.connector
 import sys
-from datetime import datetime, timedelta
-import pymysql
+import datetime
 
+# Настройки подключения к БД
+db_connection = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="password",  
+    database="forum_db"
+)
+cursor = db_connection.cursor()
 
-def get_db_connection():
-    return pymysql.connect(
-        host='127.0.0.1',  
-        port=3307,        
-        user='user',       
-        password='password', 
-        database='forum_db'  
-    )
+# Функция для агрегации данных
+def aggregate_data(start_date, end_date):
+    result = []
 
+    current_date = start_date
+    while current_date <= end_date:
+        # Подсчитываем количество новых аккаунтов
+        cursor.execute("""
+            SELECT COUNT(*) FROM users WHERE created_at = %s
+        """, (current_date,))
+        new_accounts = cursor.fetchone()[0]
 
-def calculate_daily_stats(cursor, current_date):
-    stats = {
-        'new_accounts': 0,         # Новые аккаунты
-        'anonymous_percent': 0.0,  # % анонимных сообщений
-        'total_posts': 0,          # Всего сообщений
-        'topic_growth': 0.0        # Рост тем (%)
-    }
-    
-    # 1. Подсчет новых регистраций
-    cursor.execute("""
-        SELECT COUNT(*) 
-        FROM user_logs 
-        WHERE action_type = 'register' 
-        AND server_response = 'success'
-        AND DATE(action_time) = %s;
-    """, (current_date,))
-    stats['new_accounts'] = cursor.fetchone()[0]
-    
-    # 2. Расчет процента анонимных сообщений
-    cursor.execute("""
-        SELECT 
-            COUNT(*) AS total,          
-            SUM(is_anonymous) AS anonymous  
-        FROM posts
-        WHERE DATE(created_at) = %s;
-    """, (current_date,))
-    
-    total_posts, anonymous_posts = cursor.fetchone()
-    if total_posts > 0:
-        stats['anonymous_percent'] = (anonymous_posts / total_posts) * 100
-    
-    # 3. Общее количество сообщений за день
-    stats['total_posts'] = total_posts
-    
-    return stats
+        # Подсчитываем количество сообщений
+        cursor.execute("""
+            SELECT COUNT(*) FROM messages WHERE DATE(created_at) = %s
+        """, (current_date,))
+        total_messages = cursor.fetchone()[0]
 
+        # Подсчитываем количество сообщений от анонимов
+        cursor.execute("""
+            SELECT COUNT(*) FROM messages WHERE DATE(created_at) = %s AND user_id IS NULL
+        """, (current_date,))
+        anonymous_messages = cursor.fetchone()[0]
 
-def calculate_topic_growth(cursor, current_date, prev_topics_count):
-    # Считаем общее количество тем на текущую дату
-    cursor.execute("""
-        SELECT COUNT(*)
-        FROM topics
-        WHERE DATE(created_at) <= %s;
-    """, (current_date,))
-    current_topics_count = cursor.fetchone()[0]
-    
-    # Рассчитываем процент роста
-    if prev_topics_count > 0:
-        growth = ((current_topics_count - prev_topics_count) / 
-                 prev_topics_count) * 100
-    else:
-        growth = 0.0  
-    
-    return current_topics_count, growth
+        # Вычисляем процент сообщений от анонимов
+        anonymous_percent = (anonymous_messages / total_messages * 100) if total_messages > 0 else 0
 
+        # Подсчитываем количество новых тем
+        cursor.execute("""
+            SELECT COUNT(*) FROM topics WHERE DATE(created_at) = %s
+        """, (current_date,))
+        new_topics = cursor.fetchone()[0]
 
-def write_stats_to_csv(stats, filename='forum_stats.csv'):
-    # Заголовки столбцов
-    fieldnames = [
-        'Day',             
-        'New Accounts',     
-        'Anonymous Posts %', 
-        'Total Posts',    
-        'Topic Growth %'   
-    ]
-    
-    with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()  # Записываем заголовки
-        
-        for day_stats in stats:
-            writer.writerow({
-                'Day': day_stats['date'],
-                'New Accounts': day_stats['new_accounts'],
-                'Anonymous Posts %': f"{day_stats['anonymous_percent']:.2f}%",
-                'Total Posts': day_stats['total_posts'],
-                'Topic Growth %': f"{day_stats['topic_growth']:.2f}%"
-            })
+        # Получаем количество тем на предыдущий день для расчета прироста
+        prev_date = current_date - datetime.timedelta(days=1)
+        cursor.execute("""
+            SELECT COUNT(*) FROM topics WHERE DATE(created_at) = %s
+        """, (prev_date,))
+        prev_topics = cursor.fetchone()[0]
 
+        # Вычисляем процентное изменение количества тем относительно предыдущего дня
+        if prev_topics > 0:
+            topic_growth_percent = ((new_topics / prev_topics) - 1) * 100
+        else:
+            topic_growth_percent = 0
 
-def main(start_date, end_date):
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        stats = []  # Собранная статистика
-        current_date = start_date
-        prev_topics_count = 0  # Количество тем за предыдущий день
-        
-        # Обрабатываем каждый день в диапазоне
-        while current_date <= end_date:
-            # Получаем дневную статистику
-            daily_stats = calculate_daily_stats(cursor, current_date)
-            
-            # Рассчитываем рост тем
-            current_topics_count, growth = calculate_topic_growth(
-                cursor, current_date, prev_topics_count
-            )
-            
-            # Сохраняем результаты
-            stats.append({
-                'date': current_date.strftime('%Y-%m-%d'),
-                'new_accounts': daily_stats['new_accounts'],
-                'anonymous_percent': daily_stats['anonymous_percent'],
-                'total_posts': daily_stats['total_posts'],
-                'topic_growth': growth
-            })
-            
-            prev_topics_count = current_topics_count
-            current_date += timedelta(days=1)  # Переходим к следующему дню
-        
-        # Записываем результаты в CSV
-        write_stats_to_csv(stats)
-        print(f"Сохранена в forum_stats.csv")
-        
-    except Exception as e:
-        print(f"Ошибка: {e}")
-    finally:
-        if conn:
-            conn.close()
+        result.append({
+            'day': current_date,
+            'registrations': new_accounts,
+            'anonymous_percent': f"{anonymous_percent:.2f}%",
+            'total_messages': total_messages,
+            'topic_growth_percent': f"{topic_growth_percent:.2f}%"
+        })
 
+        current_date += datetime.timedelta(days=1)
 
-if __name__ == "__main__":
-    # Проверяем аргументы командной строки
-    if len(sys.argv) != 3:
-        print("Использование: python aggregate_data.py ГГГГ-ММ-ДД ГГГГ-ММ-ДД")
-        sys.exit(1)
-    
-    try:
-        # Парсим даты из аргументов
-        start = datetime.strptime(sys.argv[1], '%Y-%m-%d').date()
-        end = datetime.strptime(sys.argv[2], '%Y-%m-%d').date()
-        
-        # Запускаем основной процесс
-        main(start, end)
-    except ValueError as e:
-        print(f"Ошибка формата даты: {e}")
-        sys.exit(1)
+    return result
+
+# Период передается через аргументы скрипта
+if len(sys.argv) < 3:
+    print("Использование: python aggregation.py <начальная_дата> <конечная_дата>")
+    print("Пример: python aggregation.py 2025-04-01 2025-04-30")
+    sys.exit(1)
+
+start_date = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%d").date()
+end_date = datetime.datetime.strptime(sys.argv[2], "%Y-%m-%d").date()
+
+# Получаем данные агрегации
+data = aggregate_data(start_date, end_date)
+
+# Запись в CSV
+import csv
+with open("aggregation_report.csv", mode="w", newline="") as file:
+    writer = csv.DictWriter(file, fieldnames=['day', 'registrations', 'anonymous_percent', 'total_messages', 'topic_growth_percent'])
+    writer.writeheader()
+    writer.writerows(data)
+
+print("Отчет агрегации сохранен в 'aggregation_report.csv'.")
+
+cursor.close()
+db_connection.close()
