@@ -8,9 +8,9 @@ services:
       MYSQL_ROOT_PASSWORD: rootpassword   # Пароль для root
       MYSQL_DATABASE: forum_db            # База данных
       MYSQL_USER: user                    # Имя пользователя
-      MYSQL_PASSWORD: userpassword        # Пароль пользователя
+      MYSQL_PASSWORD: password        # Пароль пользователя
     ports:
-      - "3307:3306"                       # Прокси порта MySQL
+      - "3306:3306"                       # Прокси порта MySQL
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Инициализация базы данных из init.sql
     networks:

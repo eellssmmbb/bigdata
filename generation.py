@@ -1,141 +1,194 @@
+import os
 import random
-import mysql.connector
-from faker import Faker
 from datetime import datetime, timedelta
+import mysql.connector
+import time
 
-fake = Faker()
 
-# Настройка подключения к базе данных
-conn = mysql.connector.connect(
-    host='localhost',
-    user='root',  
-    password='password',  
-    database='forum_db'
-)
-cursor = conn.cursor()
+def create_connection():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="rootpassword",
+        database="forum_db",
+    )
 
-# Функция для создания пользователей
-def create_users(num_users):
-    users = []
-    for _ in range(num_users):
-        username = fake.user_name()
-        password = fake.password()
-        email = fake.email()
-        users.append((username, password, email))
+NUM_DAYS = 30
+NUM_USERS = 20
 
-    cursor.executemany("""
-        INSERT INTO users (username, password, email)
-        VALUES (%s, %s, %s)
-    """, users)
+ACTIONS = [
+    "first_visit",
+    "register",
+    "login",
+    "logout",
+    "create_theme",
+    "visit_theme",
+    "delete_theme",
+    "post_message",
+]
+
+OUTPUT_DIR = "data"
+
+
+def ensure_output_dir() -> None:
+    """
+    Создаёт папку для сохранения файлов, если её ещё нет.
+    """
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def generate_users() -> list[str]:
+    """
+    Генерирует SQL-запросы для создания пользователей,
+    включая как обычных, так и анонимных.
+    """
+    users_sql = []
+    for user_id in range(1, NUM_USERS + 1):
+        is_anon = random.choice([False, False, False, True])
+        username = f"user{user_id}" if not is_anon else None
+        username_sql = f"'{username}'" if username else "NULL"
+        users_sql.append(
+            f"INSERT INTO users (id, username, is_anonymous) "
+            f"VALUES ({user_id}, {username_sql}, {str(is_anon).upper()});"
+        )
+    return users_sql
+
+
+def generate_logs_and_data() -> (
+    tuple[list[str], list[str], list[str], list[str]]
+):
+    """
+    Генерирует SQL-запросы для логов, тем и сообщений за месяц.
+    Возвращает: (логи, темы, сообщения, пользователи)
+    """
+    users = list(range(1, NUM_USERS + 1))
+    themes_created = []
+    logs_sql, themes_sql, messages_sql = [], [], []
+
+    theme_id = 1
+    message_id = 1
+    log_id = 1
+    start_date = datetime(2025, 4, 1)
+
+    for day_offset in range(NUM_DAYS):
+        day = start_date + timedelta(days=day_offset)
+
+        for _ in range(2):
+            timestamp = day + timedelta(seconds=random.randint(0, 86400))
+            logs_sql.append(
+                f"INSERT INTO logs (id, user_id, action_type, object_type, object_id, "
+                f"description, server_response, created_at) "
+                f"VALUES ({log_id}, NULL, 'create_theme', 'theme', NULL, "
+                f"'create_theme by anonymous - error', 'error', '{timestamp}');"
+            )
+            log_id += 1
+
+        for action in ACTIONS:
+            count = random.randint(5, 10)
+
+            for _ in range(count):
+                timestamp = day + timedelta(seconds=random.randint(0, 86400))
+                is_anon = action == "post_message" and random.choice(
+                    [True, False]
+                )
+                user_id = random.choice(users) if not is_anon else None
+                server_response = "success"
+                object_id = "NULL"
+                object_type = "NULL"
+                description = f"{action} action"
+
+                if action == "create_theme":
+                    if user_id is None:
+                        continue
+                    object_id = theme_id
+                    object_type = "'theme'"
+                    themes_sql.append(
+                        f"INSERT INTO themes (id, title, created_by, created_at) "
+                        f"VALUES ({theme_id}, 'Theme {theme_id}', {user_id}, '{timestamp}');"
+                    )
+                    themes_created.append(theme_id)
+                    theme_id += 1
+
+                elif (
+                    action in ["visit_theme", "delete_theme"]
+                    and themes_created
+                ):
+                    object_id = random.choice(themes_created)
+                    object_type = "'theme'"
+
+                elif action == "post_message":
+                    if themes_created:
+                        theme_for_msg = random.choice(themes_created)
+                        object_id = message_id
+                        object_type = "'message'"
+                        creator = "NULL" if is_anon else user_id
+                        messages_sql.append(
+                            f"INSERT INTO messages (id, text, created_by, theme_id, created_at) "
+                            f"VALUES ({message_id}, 'Message {message_id}', "
+                            f"{creator}, {theme_for_msg}, '{timestamp}');"
+                        )
+                        message_id += 1
+
+                user_id_sql = str(user_id) if user_id is not None else "NULL"
+
+                logs_sql.append(
+                    f"INSERT INTO logs (id, user_id, action_type, object_type, object_id, "
+                    f"description, server_response, created_at) "
+                    f"VALUES ({log_id}, {user_id_sql}, '{action}', {object_type}, "
+                    f"{object_id}, '{description}', '{server_response}', '{timestamp}');"
+                )
+                log_id += 1
+
+    users_sql = generate_users()
+    return logs_sql, themes_sql, messages_sql, users_sql
+
+
+def write_sql_file(filename: str, sql_lines: list[str]) -> None:
+    """
+    Сохраняет список SQL-запросов в файл.
+    """
+    path = os.path.join(OUTPUT_DIR, filename)
+    with open(path, "w", encoding="utf-8") as file:
+        file.write("\n".join(sql_lines))
+
+
+def main() -> None:
+    """
+    Точка входа: генерирует и сохраняет SQL-файлы.
+    """
+    ensure_output_dir()
+    logs_sql, themes_sql, messages_sql, users_sql = generate_logs_and_data()
+    write_sql_file("insert_users.sql", users_sql)
+    write_sql_file("insert_themes.sql", themes_sql)
+    write_sql_file("insert_messages.sql", messages_sql)
+    write_sql_file("insert_logs.sql", logs_sql)
+
+
+    conn = create_connection()
+    cursor = conn.cursor()
+
+    print("Генерация и вставка данных...")
+
+    cursor.execute("DELETE FROM messages")
+    cursor.execute("DELETE FROM logs")
+    cursor.execute("DELETE FROM themes")
+    cursor.execute("DELETE FROM users")
+
+    logs, themes, messages, users = generate_logs_and_data()
+
+    for query in users:
+        cursor.execute(query)
+    for query in themes:
+        cursor.execute(query)
+    for query in messages:
+        cursor.execute(query)
+    for query in logs:
+        cursor.execute(query)
+
     conn.commit()
+    cursor.close()
+    conn.close()
+    print("Данные успешно загружены!")
 
-# Функция для создания действий с минимальными порогами
-def generate_logs():
-    logs = []
-    created_topics = 0
-    created_messages = 0
-    logins = 0
-    errors = 0
-
-    # Минимальные пороги
-    min_topic_creation = 5
-    min_message_creation = 5
-    min_login = 5
-
-    # Генерация пользователей для логинов (если их еще нет)
-    create_users(10)
-
-    # Генерация логинов (смешанные действия успешные и с ошибками)
-    for _ in range(min_login):
-        username = fake.user_name()
-        password = fake.password()
-        email = fake.email()
-        action_type = "login"
-        status = random.choice(["success", "error"])
-        description = "Login attempt"
-        logs.append((username, password, email, action_type, None, status, description))
-        logins += 1
-
-    # Генерация создания тем (с минимумом 2 ошибок из-за отсутствия логина)
-    while created_topics < min_topic_creation:
-        username = fake.user_name()
-        password = fake.password()
-        email = fake.email()
-        action_type = "create_topic"
-        status = "error" if errors < 2 else "success"  # Делаем 2 ошибки по причине отсутствия логина
-        description = "Create a new topic"
-        
-        # Добавляем логи
-        if status == "error" and errors < 2:
-            logs.append((username, password, email, action_type, None, status, description))
-            errors += 1
-        else:
-            # Создаем тему
-            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-            user_id = cursor.fetchone()
-            if user_id:
-                user_id = user_id[0]
-                # Создаем тему
-                cursor.execute("""
-                    INSERT INTO topics (user_id, title)
-                    VALUES (%s, %s)
-                """, (user_id, fake.sentence()))
-                conn.commit()
-                logs.append((username, password, email, action_type, None, status, description))
-        created_topics += 1
-
-    # Генерация создания сообщений
-    while created_messages < min_message_creation:
-        username = fake.user_name()
-        password = fake.password()
-        email = fake.email()
-        action_type = "create_message"
-        status = random.choice(["success", "error"])
-        description = "Create a new message"
-        
-        # Добавление сообщения к случайной теме
-        cursor.execute("SELECT id FROM topics ORDER BY RAND() LIMIT 1")
-        topic_id = cursor.fetchone()[0]
-
-        if random.choice([True, False]):  # Равномерное распределение между залогиненым и незалогиненым пользователем
-            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-            user_id = cursor.fetchone()[0]
-            cursor.execute("""
-                INSERT INTO messages (topic_id, user_id, content)
-                VALUES (%s, %s, %s)
-            """, (topic_id, user_id, fake.text()))
-            conn.commit()
-            logs.append((username, password, email, action_type, topic_id, status, description))
-        else:
-            logs.append((username, password, email, action_type, topic_id, status, description))
-        created_messages += 1
-    
-    # Генерация случайных дополнительных действий
-    additional_actions = random.randint(5, 10)  # Дополнительные случайные действия
-    for _ in range(additional_actions):
-        username = fake.user_name()
-        password = fake.password()
-        email = fake.email()
-        action_type = random.choice(["create_topic", "create_message", "login"])
-        status = random.choice(["success", "error"])
-        description = fake.text()
-        logs.append((username, password, email, action_type, None, status, description))
-    
-    return logs
-
-# Функция для вставки данных в базу данных
-def insert_logs(logs):
-    cursor.executemany("""
-        INSERT INTO logs (username, password, email, action_type, target_id, status, description)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """, logs)
-    conn.commit()
-    print(f"{len(logs)} logs added.")
-
-# Генерация данных и вставка в базу
-logs = generate_logs()
-insert_logs(logs)
-
-# Закрытие соединения
-cursor.close()
-conn.close()
+if __name__ == "__main__":
+    main()

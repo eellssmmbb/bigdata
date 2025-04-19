@@ -1,94 +1,98 @@
 import mysql.connector
-import sys
-import datetime
-
-# Настройки подключения к БД
-db_connection = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="password",  
-    database="forum_db"
-)
-cursor = db_connection.cursor()
-
-# Функция для агрегации данных
-def aggregate_data(start_date, end_date):
-    result = []
-
-    current_date = start_date
-    while current_date <= end_date:
-        # Подсчитываем количество новых аккаунтов
-        cursor.execute("""
-            SELECT COUNT(*) FROM users WHERE created_at = %s
-        """, (current_date,))
-        new_accounts = cursor.fetchone()[0]
-
-        # Подсчитываем количество сообщений
-        cursor.execute("""
-            SELECT COUNT(*) FROM messages WHERE DATE(created_at) = %s
-        """, (current_date,))
-        total_messages = cursor.fetchone()[0]
-
-        # Подсчитываем количество сообщений от анонимов
-        cursor.execute("""
-            SELECT COUNT(*) FROM messages WHERE DATE(created_at) = %s AND user_id IS NULL
-        """, (current_date,))
-        anonymous_messages = cursor.fetchone()[0]
-
-        # Вычисляем процент сообщений от анонимов
-        anonymous_percent = (anonymous_messages / total_messages * 100) if total_messages > 0 else 0
-
-        # Подсчитываем количество новых тем
-        cursor.execute("""
-            SELECT COUNT(*) FROM topics WHERE DATE(created_at) = %s
-        """, (current_date,))
-        new_topics = cursor.fetchone()[0]
-
-        # Получаем количество тем на предыдущий день для расчета прироста
-        prev_date = current_date - datetime.timedelta(days=1)
-        cursor.execute("""
-            SELECT COUNT(*) FROM topics WHERE DATE(created_at) = %s
-        """, (prev_date,))
-        prev_topics = cursor.fetchone()[0]
-
-        # Вычисляем процентное изменение количества тем относительно предыдущего дня
-        if prev_topics > 0:
-            topic_growth_percent = ((new_topics / prev_topics) - 1) * 100
-        else:
-            topic_growth_percent = 0
-
-        result.append({
-            'day': current_date,
-            'registrations': new_accounts,
-            'anonymous_percent': f"{anonymous_percent:.2f}%",
-            'total_messages': total_messages,
-            'topic_growth_percent': f"{topic_growth_percent:.2f}%"
-        })
-
-        current_date += datetime.timedelta(days=1)
-
-    return result
-
-# Период передается через аргументы скрипта
-if len(sys.argv) < 3:
-    print("Использование: python aggregation.py <начальная_дата> <конечная_дата>")
-    print("Пример: python aggregation.py 2025-04-01 2025-04-30")
-    sys.exit(1)
-
-start_date = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%d").date()
-end_date = datetime.datetime.strptime(sys.argv[2], "%Y-%m-%d").date()
-
-# Получаем данные агрегации
-data = aggregate_data(start_date, end_date)
-
-# Запись в CSV
 import csv
-with open("aggregation_report.csv", mode="w", newline="") as file:
-    writer = csv.DictWriter(file, fieldnames=['day', 'registrations', 'anonymous_percent', 'total_messages', 'topic_growth_percent'])
-    writer.writeheader()
-    writer.writerows(data)
+from datetime import datetime, timedelta
 
-print("Отчет агрегации сохранен в 'aggregation_report.csv'.")
 
-cursor.close()
-db_connection.close()
+def create_connection():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="rootpassword",
+        database="forum_db",
+    )
+
+
+def get_aggregation_data(start_date, end_date):
+    conn = create_connection()
+    cursor = conn.cursor()
+
+    query = """
+    SELECT
+        DATE(t.created_at) AS day,
+        COUNT(DISTINCT u.id) AS new_accounts,
+        (SUM(CASE WHEN m.created_by IS NULL THEN 1 ELSE 0 END) / COUNT(m.id)) * 100 AS anonymous_message_percentage,
+        COUNT(m.id) AS total_messages,
+        ((COUNT(DISTINCT t2.id) - COUNT(DISTINCT t.id)) / COUNT(DISTINCT t.id)) * 100 AS topic_growth
+    FROM
+        users u
+    JOIN
+        themes t ON DATE(t.created_at) BETWEEN %s AND %s
+    LEFT JOIN
+        messages m ON m.theme_id = t.id
+    LEFT JOIN
+        themes t2 ON DATE(t2.created_at) = DATE(t.created_at) - INTERVAL 1 DAY
+    GROUP BY
+        DATE(t.created_at);
+    """
+
+    cursor.execute(query, (start_date, end_date))
+    data = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+    return data
+
+
+def calculate_theme_change(data):
+    aggregated_data = []
+    for i in range(1, len(data)):
+        current_day = data[i]
+        previous_day = data[i - 1]
+
+        current_day_themes = current_day[3]
+        previous_day_themes = previous_day[3]
+
+        if previous_day_themes == 0:
+            topic_growth = 0
+        else:
+            topic_growth = (
+                (current_day_themes - previous_day_themes)
+                / previous_day_themes
+            ) * 100
+
+        aggregated_data.append(
+            {
+                "day": current_day[0],
+                "new_accounts": current_day[1],
+                "anonymous_message": current_day[2],
+                "total_messages": current_day[3],
+                "topic_growth": topic_growth,
+            }
+        )
+
+    return aggregated_data
+
+
+def write_to_csv(data, filename):
+    keys = data[0].keys() if data else []
+    with open(filename, mode="w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(data)
+
+
+def main():
+    start_date = "2025-04-01"
+    end_date = "2025-04-30"
+
+    data = get_aggregation_data(start_date, end_date)
+
+    aggregated_data = calculate_theme_change(data)
+
+    output_filename = f"forum_aggregation_{start_date}_{end_date}.csv"
+    write_to_csv(aggregated_data, output_filename)
+    print(f"Данные успешно записаны в файл {output_filename}")
+
+
+if __name__ == "__main__":
+    main()

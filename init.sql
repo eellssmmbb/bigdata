@@ -1,45 +1,36 @@
--- Создание базы данных, если она еще не существует
-CREATE DATABASE IF NOT EXISTS forum_db;
-USE forum_db;
-
--- Таблица пользователей
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    email VARCHAR(100) NOT NULL
+    username VARCHAR(100),
+    is_anonymous BOOLEAN
 );
 
--- Таблица для хранения логов действий пользователей
-CREATE TABLE IF NOT EXISTS logs (
+CREATE TABLE IF NOT EXISTS themes (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    action_type VARCHAR(50) NOT NULL,
-    target_id INT,
-    status VARCHAR(10) CHECK (status IN ('success', 'error')),
-    description TEXT,
-    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    title TEXT NOT NULL,
+    created_by INT,
+    created_at TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id)
 );
 
-
--- Таблица тем
-CREATE TABLE IF NOT EXISTS topics (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- Таблица сообщений
 CREATE TABLE IF NOT EXISTS messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    topic_id INT NOT NULL,
-    user_id INT,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    text TEXT NOT NULL,
+    created_by INT,
+    theme_id INT,
+    created_at TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (theme_id) REFERENCES themes(id)
 );
+
+CREATE TABLE IF NOT EXISTS logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    action_type VARCHAR(100),
+    object_type VARCHAR(100),
+    object_id INT,
+    description TEXT,
+    server_response VARCHAR(25),
+    created_at TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
